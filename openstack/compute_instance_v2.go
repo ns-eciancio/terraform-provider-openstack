@@ -441,7 +441,12 @@ func flattenInstanceNetworks(d *schema.ResourceData, meta interface{}) ([]map[st
 		return nil, fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
 
-	server, err := servers.Get(computeClient, d.Id()).Extract()
+	serverResult, err := GetFromCache(computeClient, d.Id())
+	if err != nil {
+		return nil, CheckDeleted(d, err, "server")
+	}
+
+	server, err := serverResult.Extract()
 	if err != nil {
 		return nil, CheckDeleted(d, err, "server")
 	}

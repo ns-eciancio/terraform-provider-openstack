@@ -143,7 +143,12 @@ func dataSourceComputeInstanceV2Read(ctx context.Context, d *schema.ResourceData
 
 	id := d.Get("id").(string)
 	log.Printf("[DEBUG] Attempting to retrieve server %s", id)
-	server, err := servers.Get(computeClient, id).Extract()
+	serverResult, err := GetFromCache(computeClient, d.Id())
+	if err != nil {
+		return diag.FromErr(CheckDeleted(d, err, "server"))
+	}
+
+	server, err := serverResult.Extract()
 	if err != nil {
 		return diag.FromErr(CheckDeleted(d, err, "server"))
 	}
@@ -217,8 +222,12 @@ func dataSourceComputeInstanceV2Read(ctx context.Context, d *schema.ResourceData
 		availabilityzones.ServerAvailabilityZoneExt
 	}
 
-	// Do another Get so the above work is not disturbed.
-	err = servers.Get(computeClient, d.Id()).ExtractInto(&serverWithAZ)
+	serverResult, err = GetFromCache(computeClient, d.Id())
+	if err != nil {
+		return diag.FromErr(CheckDeleted(d, err, "server"))
+	}
+
+	err = serverResult.ExtractInto(&serverWithAZ)
 	if err != nil {
 		return diag.FromErr(CheckDeleted(d, err, "server"))
 	}

@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -673,7 +674,12 @@ func resourceComputeInstanceV2Read(_ context.Context, d *schema.ResourceData, me
 		return diag.Errorf("Error creating OpenStack compute client: %s", err)
 	}
 
-	server, err := servers.Get(computeClient, d.Id()).Extract()
+	serverResult, err := GetFromCache(computeClient, d.Id())
+	if err != nil {
+		return diag.FromErr(CheckDeleted(d, err, "server"))
+	}
+
+	server, err := serverResult.Extract()
 	if err != nil {
 		return diag.FromErr(CheckDeleted(d, err, "server"))
 	}
@@ -767,10 +773,16 @@ func resourceComputeInstanceV2Read(_ context.Context, d *schema.ResourceData, me
 	}
 
 	// Do another Get so the above work is not disturbed.
-	err = servers.Get(computeClient, d.Id()).ExtractInto(&serverWithAZ)
+	// fmt.Println("We did a servers Get on READ #2")
+	myServer, err := GetFromCache(computeClient, d.Id())
 	if err != nil {
 		return diag.FromErr(CheckDeleted(d, err, "server"))
 	}
+	err = myServer.ExtractInto(&serverWithAZ)
+	if err != nil {
+		return diag.FromErr(CheckDeleted(d, err, "server"))
+	}
+
 	// Set the availability zone
 	d.Set("availability_zone", serverWithAZ.AvailabilityZone)
 
@@ -1227,8 +1239,8 @@ func resourceOpenStackComputeInstanceV2ImportState(ctx context.Context, d *schem
 		return nil, fmt.Errorf("Error reading openstack_compute_instance_v2 %s: %v", d.Id(), diagErr)
 	}
 
-	raw := servers.Get(computeClient, d.Id())
-	if raw.Err != nil {
+	raw, err := GetFromCache(computeClient, d.Id())
+	if err != nil {
 		return nil, CheckDeleted(d, raw.Err, "openstack_compute_instance_v2")
 	}
 
@@ -1324,11 +1336,100 @@ func resourceOpenStackComputeInstanceV2ImportState(ctx context.Context, d *schem
 	return results, nil
 }
 
+// var foundServers map[string]servers.GetResult
+// var foundAzServers map[string]serverWithAz
+// var mu sync.Mutex
+
+// func ExtractIntoServersWithAz(r pagination.Page) ([]serverWithAz, error) {
+// 	var s []serverWithAz
+// 	err := servers.ExtractServersInto(r, &s)
+// 	return s, err
+// }
+
+// type serverWithAz struct {
+// 	servers.Server
+// 	availabilityzones.ServerAvailabilityZoneExt
+// }
+
+// func GetFromAzCache(client *gophercloud.ServiceClient, id string) (*serverWithAz, error) {
+// 	mu.Lock()
+// 	if foundAzServers == nil {
+// 		foundAzServers = make(map[string]serverWithAz)
+// 		fmt.Println("------------------")
+// 		fmt.Println("WE Other THEM ONCE")
+// 		fmt.Println("------------------")
+// 		listOpts := servers.ListOpts{}
+
+// 		allPages, err := servers.List(client, listOpts).AllPages()
+// 		if err != nil {
+// 			panic(err)
+// 		}
+
+// 		serversWithAz, err := ExtractIntoServersWithAz(allPages)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+
+// 		for _, server := range serversWithAz {
+// 			fmt.Println(server.Server.ID)
+// 			fmt.Println(server.ServerAvailabilityZoneExt.AvailabilityZone)
+// 			foundAzServers[server.ID] = server
+// 		}
+// 	}
+// 	mu.Unlock()
+// 	server, ok := foundAzServers[id]
+// 	var err error
+// 	if ok {
+// 		err = nil
+// 	} else {
+// 		err = gophercloud.ErrDefault404{}
+// 	}
+// 	return &server, err
+// }
+
+var foundServers map[string]servers.GetResult
+var mu sync.Mutex
+
+func GetFromCache(client *gophercloud.ServiceClient, id string) (servers.GetResult, error) {
+	mu.Lock()
+	if foundServers == nil {
+		foundServers = make(map[string]servers.GetResult)
+		fmt.Println("------------------")
+		fmt.Println("Founder Servers Called")
+		fmt.Println("------------------")
+		listOpts := servers.ListOpts{}
+
+		pager, _ := servers.List(client, listOpts).AllPages()
+		serverResults := pager.(servers.ServerPage).Result.Body.(map[string][]interface{})["servers"]
+		for _, server := range serverResults {
+			newGetResult := servers.GetResult{}
+			id, ok := server.(map[string]interface{})["id"]
+			if ok {
+				idStr := id.(string)
+				newMap := make(map[string]interface{})
+				newMap["server"] = server
+				newGetResult.Body = newMap
+				foundServers[idStr] = newGetResult
+			}
+		}
+	}
+	mu.Unlock()
+	res, ok := foundServers[id]
+	if !ok {
+		return servers.GetResult{}, nil
+	}
+	return res, nil
+}
+
 // ServerV2StateRefreshFunc returns a resource.StateRefreshFunc that is used to watch
 // an OpenStack instance.
 func ServerV2StateRefreshFunc(client *gophercloud.ServiceClient, instanceID string) resource.StateRefreshFunc {
 	return func() (interface{}, string, error) {
-		s, err := servers.Get(client, instanceID).Extract()
+		getResult, err := GetFromCache(client, instanceID)
+		if err != nil {
+			return nil, "", err
+		}
+		s, err := getResult.Extract()
 		if err != nil {
 			if _, ok := err.(gophercloud.ErrDefault404); ok {
 				return s, "DELETED", nil

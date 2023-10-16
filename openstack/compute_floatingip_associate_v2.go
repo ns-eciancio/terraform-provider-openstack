@@ -8,7 +8,6 @@ import (
 
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/floatingips"
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	nfloatingips "github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/layer3/floatingips"
 )
 
@@ -74,11 +73,15 @@ func computeFloatingIPAssociateV2ComputeExists(computeClient *gophercloud.Servic
 func computeFloatingIPAssociateV2CheckAssociation(
 	computeClient *gophercloud.ServiceClient, instanceID, floatingIP string) resource.StateRefreshFunc {
 	return func() (interface{}, string, error) {
-		instance, err := servers.Get(computeClient, instanceID).Extract()
+		serverResult, err := GetFromCache(computeClient, instanceID)
+		if err != nil {
+			return nil, "", err
+		}
+
+		instance, err := serverResult.Extract()
 		if err != nil {
 			return instance, "", err
 		}
-
 		var associated bool
 		for _, networkAddresses := range instance.Addresses {
 			for _, element := range networkAddresses.([]interface{}) {

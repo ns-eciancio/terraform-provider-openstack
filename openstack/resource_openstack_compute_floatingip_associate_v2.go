@@ -12,7 +12,6 @@ import (
 
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/floatingips"
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 )
 
 func resourceComputeFloatingIPAssociateV2() *schema.Resource {
@@ -158,11 +157,19 @@ func resourceComputeFloatingIPAssociateV2Read(_ context.Context, d *schema.Resou
 	}
 
 	// Next, see if the instance still exists
-	instance, err := servers.Get(computeClient, instanceID).Extract()
+	serverResult, err := GetFromCache(computeClient, d.Id())
 	if err != nil {
 		if CheckDeleted(d, err, "instance") == nil {
 			return nil
 		}
+	}
+
+	instance, err := serverResult.Extract()
+	if err != nil {
+		if CheckDeleted(d, err, "instance") == nil {
+			return nil
+		}
+
 	}
 
 	// Finally, check and see if the floating ip is still associated with the instance.
