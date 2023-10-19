@@ -1388,10 +1388,10 @@ func resourceOpenStackComputeInstanceV2ImportState(ctx context.Context, d *schem
 // }
 
 var foundServers map[string]servers.GetResult
-var mu sync.Mutex
+var volumeMu sync.Mutex
 
 func GetFromCache(client *gophercloud.ServiceClient, id string) (servers.GetResult, error) {
-	mu.Lock()
+	volumeMu.Lock()
 	if foundServers == nil {
 		foundServers = make(map[string]servers.GetResult)
 		fmt.Println("------------------")
@@ -1413,7 +1413,7 @@ func GetFromCache(client *gophercloud.ServiceClient, id string) (servers.GetResu
 			}
 		}
 	}
-	mu.Unlock()
+	volumeMu.Unlock()
 	res, ok := foundServers[id]
 	if !ok {
 		return servers.GetResult{}, nil

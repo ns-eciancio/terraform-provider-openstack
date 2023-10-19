@@ -8,7 +8,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 
 	"github.com/gophercloud/gophercloud"
-	"github.com/gophercloud/gophercloud/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/volumeattach"
 )
 
@@ -39,7 +38,11 @@ func computeVolumeAttachV2AttachFunc(computeClient *gophercloud.ServiceClient, b
 			return va, "ATTACHED", nil
 		}
 
-		v, err := volumes.Get(blockStorageClient, volumeID).Extract()
+		volumeResult, err := GetFromVolumeCache(blockStorageClient, volumeID)
+		if err != nil {
+			return va, "", err
+		}
+		v, err := volumeResult.Extract()
 		if err != nil {
 			return va, "", err
 		}
